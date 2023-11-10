@@ -1,28 +1,63 @@
 package main
 
 import (
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/watch"
 	"reflect"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/testing"
 )
+
+type Clientset struct {
+	testing.Fake
+	tracker testing.ObjectTracker
+}
+
+// NewSimpleClientset returns a clientset that will respond with the provided objects.
+// It's backed by a very simple object tracker that processes creates, updates and deletions as-is,
+// without applying any validations and/or defaults. It shouldn't be considered a replacement
+// for a real clientset and is mostly useful in simple unit tests.
+func NewSimpleClientset(objects ...runtime.Object) *Clientset {
+
+	s := runtime.NewScheme()
+	metav1.AddMetaToScheme(s)
+	corev1.AddToScheme(s)
+	cf := serializer.NewCodecFactory(s)
+	o := testing.NewObjectTracker(s, cf.UniversalDecoder())
+	for _, obj := range objects {
+		if err := o.Add(obj); err != nil {
+			panic(err)
+		}
+	}
+
+	cs := &Clientset{tracker: o}
+	cs.AddReactor("*", "*", testing.ObjectReaction(o))
+	cs.AddWatchReactor("*", func(action testing.Action) (handled bool, ret watch.Interface, err error) {
+		gvr := action.GetResource()
+		ns := action.GetNamespace()
+		watch, err := o.Watch(gvr, ns)
+		if err != nil {
+			return false, nil, err
+		}
+		return true, watch, nil
+	})
+
+	return cs
+}
 
 type fakeAPI[T Resource] struct {
 	*testing.Fake
 	tracker testing.ObjectTracker
-	// We store a fake.Clientset only for conversion to one...
-	// We could create one on the fly when requested, but some tweaks would be needed to the API.
-	csf     *fake.Clientset
 }
 
 func NewFake[T Resource](objects ...T) FakeAPI[T] {
-	csf := fake.NewSimpleClientset()
+	csf := NewSimpleClientset()
 	f := &csf.Fake
-	// TODO: no scheme
-	o := csf.Tracker()
+	o := csf.tracker
 	for _, obj := range objects {
 		if err := o.Add(any(&obj).(runtime.Object)); err != nil {
 			panic(err)
@@ -32,7 +67,6 @@ func NewFake[T Resource](objects ...T) FakeAPI[T] {
 	cs := &fakeAPI[T]{
 		tracker: o,
 		Fake:    f,
-		csf: csf,
 	}
 	//cs.AddReactor("*", "*", testing.ObjectReaction(o))
 	//cs.AddWatchReactor("*", func(action testing.Action) (handled bool, ret watch.Interface, err error) {
@@ -132,9 +166,4 @@ var _ FakeAPI[Resource] = fakeAPI[Resource]{}
 
 type FakeAPI[T Resource] interface {
 	API[T]
-	ToClientSet() *fake.Clientset
-}
-
-func (f fakeAPI[T]) ToClientSet() *fake.Clientset {
-	return f.csf
 }

@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 )
@@ -87,7 +86,8 @@ func resourceAsobject(r Resource) runtime.Object {
 }
 
 type Client struct {
-	client rest.Interface
+	client         rest.Interface
+	parameterCodec runtime.ParameterCodec
 }
 
 func Get[T Resource](c *Client, name, namespace string, options metav1.GetOptions) (*T, error) {
@@ -98,7 +98,7 @@ func Get[T Resource](c *Client, name, namespace string, options metav1.GetOption
 		Namespace(namespace).
 		Resource((*result).ResourceName()).
 		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
+		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(x)
@@ -115,7 +115,7 @@ func Create[T Resource](c *Client, t T, options metav1.CreateOptions) (*T, error
 		Namespace(meta.GetNamespace()).
 		Resource((*result).ResourceName()).
 		Name(meta.GetName()).
-		VersionedParams(&options, scheme.ParameterCodec).
+		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(x)
@@ -132,7 +132,7 @@ func Update[T Resource](c *Client, t T, options metav1.UpdateOptions) (*T, error
 		Namespace(meta.GetNamespace()).
 		Resource((*result).ResourceName()).
 		Name(meta.GetName()).
-		VersionedParams(&options, scheme.ParameterCodec).
+		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(x)
@@ -151,7 +151,7 @@ func List[T Resource](c *Client, namespace string, opts metav1.ListOptions) ([]T
 		Namespace(namespace).
 		Resource((*result).ResourceName()).
 		Timeout(timeout).
-		VersionedParams(&opts, scheme.ParameterCodec).
+		VersionedParams(&opts, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(&x)
@@ -173,7 +173,7 @@ func Watch[T Resource](c *Client, namespace string, options metav1.ListOptions) 
 	wi, err := c.client.Get().
 		Namespace(namespace).
 		Resource((*result).ResourceName()).
-		VersionedParams(&options, scheme.ParameterCodec).
+		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Watch(context.Background())
 	if err != nil {

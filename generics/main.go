@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,9 +18,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 )
 
 func main() {
@@ -47,8 +44,10 @@ func main() {
 		log.Fatal(err)
 	}
 	c := &Client{
-		client: rc,
+		client:         rc,
+		parameterCodec: runtime.NewParameterCodec(s),
 	}
+
 	r, err := Get[appsv1.Deployment](c, "kube-dns", "kube-system", metav1.GetOptions{})
 	log.Println(r.Name, err)
 	for _, dep := range MustList[appsv1.Deployment](c, "istio-system") {
@@ -93,59 +92,62 @@ func main() {
 	}
 
 	// Fake
-	f := NewFake(corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "fake", Namespace: "fake"},
-	})
+	/*
+		f := NewFake(corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "fake", Namespace: "fake"},
+		})
 
-	g, e := f.Get("fake", "fake", metav1.GetOptions{})
-	log.Printf("fake get: %v %v", g.Name, e)
-	l, e := f.List("fake", metav1.ListOptions{})
-	log.Printf("fake list: %v %v", len(l), e)
+		g, e := f.Get("fake", "fake", metav1.GetOptions{})
+		log.Printf("fake get: %v %v", g.Name, e)
+		l, e := f.List("fake", metav1.ListOptions{})
+		log.Printf("fake list: %v %v", len(l), e)
 
-	fakeInformer := NewInformer[corev1.Pod](f, "fake")
-	log.Printf("informer list: %v", len(fakeInformer.List(klabels.Everything())))
-	log.Printf("creating pod...")
-	f.Create(corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "fake-added", Namespace: "fake"},
-	}, metav1.CreateOptions{})
-	time.Sleep(time.Millisecond * 100)
-	log.Printf("informer list: %v", len(fakeInformer.List(klabels.Everything())))
+		fakeInformer := NewInformer[corev1.Pod](f, "fake")
+		log.Printf("informer list: %v", len(fakeInformer.List(klabels.Everything())))
+		log.Printf("creating pod...")
+		f.Create(corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "fake-added", Namespace: "fake"},
+		}, metav1.CreateOptions{})
+		time.Sleep(time.Millisecond * 100)
+		log.Printf("informer list: %v", len(fakeInformer.List(klabels.Everything())))
 
-	fcs := f.ToClientSet()
-	fcsList, _ := fcs.CoreV1().Pods(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+		//fcs := f.ToClientSet()
+		//fcsList, _ := fcs.CoreV1().Pods(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+		//
+		//log.Printf("fcs list: %v", len(fcsList.Items))
+		//fakeLegacyInformer := informers.NewSharedInformerFactory(fcs, 0)
+		//legacyPods := fakeLegacyInformer.Core().V1().Pods()
+		//legacyPods.Informer() // load it
+		//fakeLegacyInformer.Start(make(chan struct{}))
+		//cache.WaitForCacheSync(make(chan struct{}), legacyPods.Informer().HasSynced)
+		//lpil, _ := legacyPods.Lister().List(klabels.Everything())
+		//log.Printf("fake legacy informer list: %v", len(lpil))
 
-	log.Printf("fcs list: %v", len(fcsList.Items))
-	fakeLegacyInformer := informers.NewSharedInformerFactory(fcs, 0)
-	legacyPods := fakeLegacyInformer.Core().V1().Pods()
-	legacyPods.Informer() // load it
-	fakeLegacyInformer.Start(make(chan struct{}))
-	cache.WaitForCacheSync(make(chan struct{}), legacyPods.Informer().HasSynced)
-	lpil, _ := legacyPods.Lister().List(klabels.Everything())
-	log.Printf("fake legacy informer list: %v", len(lpil))
+		f.Update(corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "fake", Namespace: "fake", Labels: map[string]string{"a": "b"}},
+		}, metav1.UpdateOptions{})
+		nf, _ := f.Get("fake", "fake", metav1.GetOptions{})
+		log.Printf("after update, label is %v", nf.Labels)
 
-	f.Update(corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "fake", Namespace: "fake", Labels: map[string]string{"a": "b"}},
-	}, metav1.UpdateOptions{})
-	nf, _ := f.Get("fake", "fake", metav1.GetOptions{})
-	log.Printf("after update, label is %v", nf.Labels)
+		CreateOrUpdate[corev1.Pod](f, corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "fake2", Namespace: "fake", Labels: map[string]string{"a": "b"}},
+		})
+		nf, _ = f.Get("fake2", "fake", metav1.GetOptions{})
+		log.Printf("create or update, label is %v", nf.Labels)
 
-	CreateOrUpdate[corev1.Pod](f, corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "fake2", Namespace: "fake", Labels: map[string]string{"a": "b"}},
-	})
-	nf, _ = f.Get("fake2", "fake", metav1.GetOptions{})
-	log.Printf("create or update, label is %v", nf.Labels)
+		CreateOrUpdate[corev1.Pod](f, corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "fake2", Namespace: "fake", Labels: map[string]string{"a": "modified"}},
+		})
+		nf, _ = f.Get("fake2", "fake", metav1.GetOptions{})
+		log.Printf("create or update, label is %v", nf.Labels)
 
-	CreateOrUpdate[corev1.Pod](f, corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "fake2", Namespace: "fake", Labels: map[string]string{"a": "modified"}},
-	})
-	nf, _ = f.Get("fake2", "fake", metav1.GetOptions{})
-	log.Printf("create or update, label is %v", nf.Labels)
+		// Example of using wrappers to provide alternative APIs...
+		// The constructors could, of course, use some work
+		simpleFake := InfallibleOptionlessNamespaced(OptionlessNamespaced[corev1.Pod](Namespaced[corev1.Pod](f, "fake")))
+		simpleFake.Create(corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "fake3", Namespace: "fake"}})
+		log.Printf("got %v", simpleFake.Get("fake3").Name)
 
-	// Example of using wrappers to provide alternative APIs...
-	// The constructors could, of course, use some work
-	simpleFake := InfallibleOptionlessNamespaced(OptionlessNamespaced[corev1.Pod](Namespaced[corev1.Pod](f, "fake")))
-	simpleFake.Create(corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "fake3", Namespace: "fake"}})
-	log.Printf("got %v", simpleFake.Get("fake3").Name)
+	*/
 }
 
 func CreateOrUpdate[T Resource](a API[T], t T) (*T, error) {

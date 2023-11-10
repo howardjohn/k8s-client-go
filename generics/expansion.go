@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/scheme"
 )
 
 type ResourceLogger interface {
@@ -22,7 +21,7 @@ func GetLogs[T ResourceLogger](c *Client, name, namespace string, opts v1.PodLog
 		Resource((*result).ResourceName()).
 		SubResource("log").
 		Name(name).
-		VersionedParams(&opts, scheme.ParameterCodec).
+		VersionedParams(&opts, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Stream(context.Background())
 	if err != nil {
