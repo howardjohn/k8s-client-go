@@ -165,7 +165,7 @@ type TypedSharedInformer[T any] interface {
 	// This function is guaranteed to be idempotent, and thread-safe.
 	RemoveEventHandler(handle ResourceEventHandlerRegistration) error
 	// GetStore returns the informer's local cache as a Store.
-	GetStore() Store
+	GetStore() TypedStore[T]
 	// GetController is deprecated, it does nothing useful
 	GetController() Controller
 	// Run starts and runs the shared informer, returning after it stops.
@@ -234,7 +234,7 @@ type TypedSharedIndexInformer[T any] interface {
 	TypedSharedInformer[T]
 	// AddIndexers add indexers to the informer before it starts.
 	AddIndexers(indexers Indexers) error
-	GetIndexer() Indexer
+	GetIndexer() TypedIndexer[T]
 }
 
 // NewSharedInformer creates a new instance for the ListerWatcher. See NewSharedIndexInformerWithOptions for full details.
@@ -274,7 +274,7 @@ func NewTypedSharedIndexInformer[T any](lw ListerWatcher, exampleObject runtime.
 	realClock := &clock.RealClock{}
 
 	return &sharedIndexInformer[T]{
-		indexer:                         NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, options.Indexers),
+		indexer:                         NewTypedIndexer[T](DeletionHandlingMetaNamespaceKeyFunc, options.Indexers),
 		processor:                       &sharedProcessor{clock: realClock},
 		listerWatcher:                   lw,
 		objectType:                      exampleObject,
@@ -361,7 +361,7 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 // sharedProcessor, which is responsible for relaying those
 // notifications to each of the informer's clients.
 type sharedIndexInformer[T any] struct {
-	indexer    Indexer
+	indexer    TypedIndexer[T]
 	controller Controller
 
 	processor             *sharedProcessor
@@ -470,7 +470,7 @@ func (s *sharedIndexInformer[T]) Run(stopCh <-chan struct{}) {
 		defer s.startedLock.Unlock()
 
 		fifo := NewDeltaFIFOWithOptions(DeltaFIFOOptions{
-			KnownObjects:          s.indexer,
+			KnownObjects:          ErasedKeyListerGetter[T]{s.indexer},
 			EmitDeltaTypeReplaced: true,
 			Transformer:           s.transform,
 		})
@@ -535,11 +535,11 @@ func (s *sharedIndexInformer[T]) LastSyncResourceVersion() string {
 	return s.controller.LastSyncResourceVersion()
 }
 
-func (s *sharedIndexInformer[T]) GetStore() Store {
+func (s *sharedIndexInformer[T]) GetStore() TypedStore[T] {
 	return s.indexer
 }
 
-func (s *sharedIndexInformer[T]) GetIndexer() Indexer {
+func (s *sharedIndexInformer[T]) GetIndexer() TypedIndexer[T] {
 	return s.indexer
 }
 
@@ -641,7 +641,7 @@ func (s *sharedIndexInformer[T]) HandleDeltas(obj interface{}, isInInitialList b
 	defer s.blockDeltas.Unlock()
 
 	if deltas, ok := obj.(Deltas); ok {
-		return processDeltas(s, s.indexer, deltas, isInInitialList)
+		return processDeltas[T](s, s.indexer, deltas, isInInitialList)
 	}
 	return errors.New("object given as Process argument is not Deltas")
 }

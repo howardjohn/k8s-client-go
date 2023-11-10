@@ -433,16 +433,16 @@ func NewTransformingIndexerInformer(
 
 // Multiplexes updates in the form of a list of Deltas into a Store, and informs
 // a given handler of events OnUpdate, OnAdd, OnDelete
-func processDeltas(
+func processDeltas[T any](
 	// Object which receives event notifications from the given deltas
 	handler ResourceEventHandler,
-	clientState Store,
+	clientState TypedStore[T],
 	deltas Deltas,
 	isInInitialList bool,
 ) error {
 	// from oldest to newest
 	for _, d := range deltas {
-		obj := d.Object
+		obj := cast[T](d.Object)
 
 		switch d.Type {
 		case Sync, Replaced, Added, Updated:
@@ -465,6 +465,17 @@ func processDeltas(
 		}
 	}
 	return nil
+}
+
+func cast[T any](a any) T {
+	if d, ok := a.(DeletedFinalStateUnknown); ok {
+		a = d.Obj
+	}
+	if t, ok := a.(T); ok {
+		return t
+	}
+	var empty T
+	return empty
 }
 
 // newInformer returns a controller for populating the store while also

@@ -32,12 +32,13 @@ import (
 //  2. a name of an index, and
 //  3. an "indexed value", which is produced by an IndexFunc and
 //     can be a field value or any other string computed from the object.
-type Indexer interface {
-	Store
+type Indexer = TypedIndexer[any]
+type TypedIndexer[T any] interface {
+	TypedStore[T]
 	// Index returns the stored objects whose set of indexed values
 	// intersects the set of indexed values of the given object, for
 	// the named index
-	Index(indexName string, obj interface{}) ([]interface{}, error)
+	Index(indexName string, obj T) ([]T, error)
 	// IndexKeys returns the storage keys of the stored objects whose
 	// set of indexed values for the named index includes the given
 	// indexed value
@@ -46,7 +47,7 @@ type Indexer interface {
 	ListIndexFuncValues(indexName string) []string
 	// ByIndex returns the stored objects whose set of indexed values
 	// for the named index includes the given indexed value
-	ByIndex(indexName, indexedValue string) ([]interface{}, error)
+	ByIndex(indexName, indexedValue string) ([]T, error)
 	// GetIndexers return the indexers
 	GetIndexers() Indexers
 

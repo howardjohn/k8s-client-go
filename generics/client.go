@@ -250,11 +250,11 @@ type NamespaceLister[T Resource] interface {
 
 type Informer[T Resource] struct {
 	api   API[T]
-	inner cache.SharedIndexInformer
+	inner cache.TypedSharedIndexInformer[T]
 }
 
 func (i Informer[T]) List(selector labels.Selector) []T {
-	return castList[T](i.inner.GetStore().List())
+	return i.inner.GetStore().List()
 }
 
 func castList[T any](l []any) []T {
@@ -277,28 +277,24 @@ func (i Informer[T]) ByNamespace(namespace string) NamespaceLister[T] {
 
 func NewInformer[T Resource](api API[T], namespace string) Lister[T] {
 	// TODO: make it a factory
-	informer := cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				res, err := api.List(namespace, options)
-				if err != nil {
-					return nil, err
-				}
-				return toRuntimeObject(res), nil
-				// TODO: convert? Or make our own ListWatch
-			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				res, err := api.Watch(namespace, options)
-				if err != nil {
-					return nil, err
-				}
-				return res.inner, nil
-			},
+	lw := &cache.ListWatch{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			res, err := api.List(namespace, options)
+			if err != nil {
+				return nil, err
+			}
+			return toRuntimeObject(res), nil
+			// TODO: convert? Or make our own ListWatch
 		},
-		any(new(T)).(runtime.Object),
-		0,
-		cache.Indexers{},
-	)
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			res, err := api.Watch(namespace, options)
+			if err != nil {
+				return nil, err
+			}
+			return res.inner, nil
+		},
+	}
+	informer := cache.NewTypedSharedIndexInformer[T](lw, any(new(T)).(runtime.Object), cache.SharedIndexInformerOptions{})
 	// Just for simple examples, wouldn't do this in real world
 	go informer.Run(make(chan struct{}))
 	cache.WaitForCacheSync(make(chan struct{}), informer.HasSynced)

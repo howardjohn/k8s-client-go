@@ -98,7 +98,8 @@ type DeltaFIFOOptions struct {
 // A note on threading: If you call Pop() in parallel from multiple
 // threads, you could end up with multiple threads processing slightly
 // different versions of the same object.
-type DeltaFIFO struct {
+type DeltaFIFO = TypedDeltaFIFO[any]
+type TypedDeltaFIFO[T any] struct {
 	// lock/cond protects access to 'items' and 'queue'.
 	lock sync.RWMutex
 	cond sync.Cond
@@ -120,11 +121,11 @@ type DeltaFIFO struct {
 
 	// keyFunc is used to make the key used for queued item
 	// insertion and retrieval, and should be deterministic.
-	keyFunc KeyFunc
+	keyFunc TypedKeyFunc[T]
 
 	// knownObjects list keys that are "known" --- affecting Delete(),
 	// Replace(), and Resync()
-	knownObjects KeyListerGetter
+	knownObjects TypedKeyListerGetter[T]
 
 	// Used to indicate a queue is closed so a control loop can exit when a queue is empty.
 	// Currently, not used to gate any of CRUD operations.
@@ -273,7 +274,7 @@ var (
 )
 
 // Close the queue.
-func (f *DeltaFIFO) Close() {
+func (f *TypedDeltaFIFO[T]) Close() {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.closed = true
@@ -282,7 +283,7 @@ func (f *DeltaFIFO) Close() {
 
 // KeyOf exposes f's keyFunc, but also detects the key of a Deltas object or
 // DeletedFinalStateUnknown objects.
-func (f *DeltaFIFO) KeyOf(obj interface{}) (string, error) {
+func (f *TypedDeltaFIFO[T]) KeyOf(obj interface{}) (string, error) {
 	if d, ok := obj.(Deltas); ok {
 		if len(d) == 0 {
 			return "", KeyError{obj, ErrZeroLengthDeltasObject}
@@ -292,24 +293,24 @@ func (f *DeltaFIFO) KeyOf(obj interface{}) (string, error) {
 	if d, ok := obj.(DeletedFinalStateUnknown); ok {
 		return d.Key, nil
 	}
-	return f.keyFunc(obj)
+	return f.keyFunc(cast[T](obj))
 }
 
 // HasSynced returns true if an Add/Update/Delete/AddIfNotPresent are called first,
 // or the first batch of items inserted by Replace() has been popped.
-func (f *DeltaFIFO) HasSynced() bool {
+func (f *TypedDeltaFIFO[T]) HasSynced() bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	return f.hasSynced_locked()
 }
 
-func (f *DeltaFIFO) hasSynced_locked() bool {
+func (f *TypedDeltaFIFO[T]) hasSynced_locked() bool {
 	return f.populated && f.initialPopulationCount == 0
 }
 
 // Add inserts an item, and puts it in the queue. The item is only enqueued
 // if it doesn't already exist in the set.
-func (f *DeltaFIFO) Add(obj interface{}) error {
+func (f *TypedDeltaFIFO[T]) Add(obj interface{}) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.populated = true
@@ -317,7 +318,7 @@ func (f *DeltaFIFO) Add(obj interface{}) error {
 }
 
 // Update is just like Add, but makes an Updated Delta.
-func (f *DeltaFIFO) Update(obj interface{}) error {
+func (f *TypedDeltaFIFO[T]) Update(obj interface{}) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.populated = true
@@ -329,7 +330,7 @@ func (f *DeltaFIFO) Update(obj interface{}) error {
 // already been deleted by a Replace (re-list), for example.)  In this
 // method `f.knownObjects`, if not nil, provides (via GetByKey)
 // _additional_ objects that are considered to already exist.
-func (f *DeltaFIFO) Delete(obj interface{}) error {
+func (f *TypedDeltaFIFO[T]) Delete(obj interface{}) error {
 	id, err := f.KeyOf(obj)
 	if err != nil {
 		return KeyError{obj, err}
@@ -370,7 +371,7 @@ func (f *DeltaFIFO) Delete(obj interface{}) error {
 //
 // Important: obj must be a Deltas (the output of the Pop() function). Yes, this is
 // different from the Add/Update/Delete functions.
-func (f *DeltaFIFO) AddIfNotPresent(obj interface{}) error {
+func (f *TypedDeltaFIFO[T]) AddIfNotPresent(obj interface{}) error {
 	deltas, ok := obj.(Deltas)
 	if !ok {
 		return fmt.Errorf("object must be of type deltas, but got: %#v", obj)
@@ -387,7 +388,7 @@ func (f *DeltaFIFO) AddIfNotPresent(obj interface{}) error {
 
 // addIfNotPresent inserts deltas under id if it does not exist, and assumes the caller
 // already holds the fifo lock.
-func (f *DeltaFIFO) addIfNotPresent(id string, deltas Deltas) {
+func (f *TypedDeltaFIFO[T]) addIfNotPresent(id string, deltas Deltas) {
 	f.populated = true
 	if _, exists := f.items[id]; exists {
 		return
@@ -439,7 +440,7 @@ func isDeletionDup(a, b *Delta) *Delta {
 
 // queueActionLocked appends to the delta list for the object.
 // Caller must lock first.
-func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) error {
+func (f *TypedDeltaFIFO[T]) queueActionLocked(actionType DeltaType, obj interface{}) error {
 	id, err := f.KeyOf(obj)
 	if err != nil {
 		return KeyError{obj, err}
@@ -487,13 +488,13 @@ func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) err
 // List returns a list of all the items; it returns the object
 // from the most recent Delta.
 // You should treat the items returned inside the deltas as immutable.
-func (f *DeltaFIFO) List() []interface{} {
+func (f *TypedDeltaFIFO[T]) List() []interface{} {
 	f.lock.RLock()
 	defer f.lock.RUnlock()
 	return f.listLocked()
 }
 
-func (f *DeltaFIFO) listLocked() []interface{} {
+func (f *TypedDeltaFIFO[T]) listLocked() []interface{} {
 	list := make([]interface{}, 0, len(f.items))
 	for _, item := range f.items {
 		list = append(list, item.Newest().Object)
@@ -503,7 +504,7 @@ func (f *DeltaFIFO) listLocked() []interface{} {
 
 // ListKeys returns a list of all the keys of the objects currently
 // in the FIFO.
-func (f *DeltaFIFO) ListKeys() []string {
+func (f *TypedDeltaFIFO[T]) ListKeys() []string {
 	f.lock.RLock()
 	defer f.lock.RUnlock()
 	list := make([]string, 0, len(f.queue))
@@ -516,7 +517,7 @@ func (f *DeltaFIFO) ListKeys() []string {
 // Get returns the complete list of deltas for the requested item,
 // or sets exists=false.
 // You should treat the items returned inside the deltas as immutable.
-func (f *DeltaFIFO) Get(obj interface{}) (item interface{}, exists bool, err error) {
+func (f *TypedDeltaFIFO[T]) Get(obj T) (item any, exists bool, err error) {
 	key, err := f.KeyOf(obj)
 	if err != nil {
 		return nil, false, KeyError{obj, err}
@@ -527,7 +528,7 @@ func (f *DeltaFIFO) Get(obj interface{}) (item interface{}, exists bool, err err
 // GetByKey returns the complete list of deltas for the requested item,
 // setting exists=false if that list is empty.
 // You should treat the items returned inside the deltas as immutable.
-func (f *DeltaFIFO) GetByKey(key string) (item interface{}, exists bool, err error) {
+func (f *TypedDeltaFIFO[T]) GetByKey(key string) (item any, exists bool, err error) {
 	f.lock.RLock()
 	defer f.lock.RUnlock()
 	d, exists := f.items[key]
@@ -540,7 +541,7 @@ func (f *DeltaFIFO) GetByKey(key string) (item interface{}, exists bool, err err
 }
 
 // IsClosed checks if the queue is closed
-func (f *DeltaFIFO) IsClosed() bool {
+func (f *TypedDeltaFIFO[T]) IsClosed() bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	return f.closed
@@ -560,7 +561,7 @@ func (f *DeltaFIFO) IsClosed() bool {
 //
 // Pop returns a 'Deltas', which has a complete list of all the things
 // that happened to the object (deltas) while it was sitting in the queue.
-func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
+func (f *TypedDeltaFIFO[T]) Pop(process PopProcessFunc) (interface{}, error) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	for {
@@ -620,7 +621,7 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 // `f.items` and `f.knownObjects` (if not nil). The last known object for key K is
 // the one present in the last delta in `f.items`. If there is no delta for K
 // in `f.items`, it is the object in `f.knownObjects`
-func (f *DeltaFIFO) Replace(list []interface{}, _ string) error {
+func (f *TypedDeltaFIFO[T]) Replace(list []interface{}, _ string) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	keys := make(sets.String, len(list))
@@ -680,10 +681,12 @@ func (f *DeltaFIFO) Replace(list []interface{}, _ string) error {
 
 			deletedObj, exists, err := f.knownObjects.GetByKey(k)
 			if err != nil {
-				deletedObj = nil
+				var empty T
+				deletedObj = empty
 				klog.Errorf("Unexpected error %v during lookup of key %v, placing DeleteFinalStateUnknown marker without object", err, k)
 			} else if !exists {
-				deletedObj = nil
+				var empty T
+				deletedObj = empty
 				klog.Infof("Key %v does not exist in known objects store, placing DeleteFinalStateUnknown marker without object", k)
 			}
 			queuedDeletions++
@@ -704,7 +707,7 @@ func (f *DeltaFIFO) Replace(list []interface{}, _ string) error {
 // Resync adds, with a Sync type of Delta, every object listed by
 // `f.knownObjects` whose key is not already queued for processing.
 // If `f.knownObjects` is `nil` then Resync does nothing.
-func (f *DeltaFIFO) Resync() error {
+func (f *TypedDeltaFIFO[T]) Resync() error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
@@ -721,7 +724,7 @@ func (f *DeltaFIFO) Resync() error {
 	return nil
 }
 
-func (f *DeltaFIFO) syncKeyLocked(key string) error {
+func (f *TypedDeltaFIFO[T]) syncKeyLocked(key string) error {
 	obj, exists, err := f.knownObjects.GetByKey(key)
 	if err != nil {
 		klog.Errorf("Unexpected error %v during lookup of key %v, unable to queue object for sync", err, key)
@@ -749,10 +752,22 @@ func (f *DeltaFIFO) syncKeyLocked(key string) error {
 	return nil
 }
 
+type ErasedKeyListerGetter[T any] struct {
+	TypedKeyListerGetter[T]
+}
+
+func (e ErasedKeyListerGetter[T]) GetByKey(key string) (value any, exists bool, err error) {
+	return e.TypedKeyListerGetter.GetByKey(key)
+}
+
+var _ KeyListerGetter = ErasedKeyListerGetter[any]{}
+
 // A KeyListerGetter is anything that knows how to list its keys and look up by key.
-type KeyListerGetter interface {
+type KeyListerGetter = TypedKeyListerGetter[any]
+
+type TypedKeyListerGetter[T any] interface {
 	KeyLister
-	KeyGetter
+	TypedKeyGetter[T]
 }
 
 // A KeyLister is anything that knows how to list its keys.
@@ -761,9 +776,10 @@ type KeyLister interface {
 }
 
 // A KeyGetter is anything that knows how to get the value stored under a given key.
-type KeyGetter interface {
+type KeyGetter = TypedKeyGetter[any]
+type TypedKeyGetter[T any] interface {
 	// GetByKey returns the value associated with the key, or sets exists=false.
-	GetByKey(key string) (value interface{}, exists bool, err error)
+	GetByKey(key string) (value T, exists bool, err error)
 }
 
 // Oldest is a convenience function that returns the oldest delta, or
