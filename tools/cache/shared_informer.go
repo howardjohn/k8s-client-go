@@ -132,7 +132,9 @@ import (
 // A delete notification exposes the last locally known non-absent
 // state, except that its ResourceVersion is replaced with a
 // ResourceVersion in which the object is actually absent.
-type SharedInformer interface {
+type SharedInformer = TypedSharedInformer[any]
+
+type TypedSharedInformer[T any] interface {
 	// AddEventHandler adds an event handler to the shared informer using
 	// the shared informer's resync period.  Events to a single handler are
 	// delivered sequentially, but there is no coordination between
@@ -227,8 +229,9 @@ type ResourceEventHandlerRegistration interface {
 }
 
 // SharedIndexInformer provides add and get Indexers ability based on SharedInformer.
-type SharedIndexInformer interface {
-	SharedInformer
+type SharedIndexInformer = TypedSharedIndexInformer[any]
+type TypedSharedIndexInformer[T any] interface {
+	TypedSharedInformer[T]
 	// AddIndexers add indexers to the informer before it starts.
 	AddIndexers(indexers Indexers) error
 	GetIndexer() Indexer
@@ -264,9 +267,13 @@ func NewSharedIndexInformer(lw ListerWatcher, exampleObject runtime.Object, defa
 // options.ResyncPeriod given here and (b) the constant
 // `minimumResyncPeriod` defined in this file.
 func NewSharedIndexInformerWithOptions(lw ListerWatcher, exampleObject runtime.Object, options SharedIndexInformerOptions) SharedIndexInformer {
+	return NewTypedSharedIndexInformer[any](lw, exampleObject, options)
+}
+
+func NewTypedSharedIndexInformer[T any](lw ListerWatcher, exampleObject runtime.Object, options SharedIndexInformerOptions) TypedSharedIndexInformer[T] {
 	realClock := &clock.RealClock{}
 
-	return &sharedIndexInformer{
+	return &sharedIndexInformer[T]{
 		indexer:                         NewIndexer(DeletionHandlingMetaNamespaceKeyFunc, options.Indexers),
 		processor:                       &sharedProcessor{clock: realClock},
 		listerWatcher:                   lw,
@@ -353,7 +360,7 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 // the sharedProcessor.  The third main component is that
 // sharedProcessor, which is responsible for relaying those
 // notifications to each of the informer's clients.
-type sharedIndexInformer struct {
+type sharedIndexInformer[T any] struct {
 	indexer    Indexer
 	controller Controller
 
@@ -397,18 +404,18 @@ type sharedIndexInformer struct {
 // level logic will decide when to start the SharedInformer and related controller.
 // Because returning information back is always asynchronous, the legacy callers shouldn't
 // notice any change in behavior.
-type dummyController struct {
-	informer *sharedIndexInformer
+type dummyController[T any] struct {
+	informer *sharedIndexInformer[T]
 }
 
-func (v *dummyController) Run(stopCh <-chan struct{}) {
+func (v *dummyController[T]) Run(stopCh <-chan struct{}) {
 }
 
-func (v *dummyController) HasSynced() bool {
+func (v *dummyController[T]) HasSynced() bool {
 	return v.informer.HasSynced()
 }
 
-func (v *dummyController) LastSyncResourceVersion() string {
+func (v *dummyController[T]) LastSyncResourceVersion() string {
 	return ""
 }
 
@@ -426,7 +433,7 @@ type deleteNotification struct {
 	oldObj interface{}
 }
 
-func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) error {
+func (s *sharedIndexInformer[T]) SetWatchErrorHandler(handler WatchErrorHandler) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -438,7 +445,7 @@ func (s *sharedIndexInformer) SetWatchErrorHandler(handler WatchErrorHandler) er
 	return nil
 }
 
-func (s *sharedIndexInformer) SetTransform(handler TransformFunc) error {
+func (s *sharedIndexInformer[T]) SetTransform(handler TransformFunc) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -450,7 +457,7 @@ func (s *sharedIndexInformer) SetTransform(handler TransformFunc) error {
 	return nil
 }
 
-func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
+func (s *sharedIndexInformer[T]) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
 	if s.HasStarted() {
@@ -502,13 +509,13 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	s.controller.Run(stopCh)
 }
 
-func (s *sharedIndexInformer) HasStarted() bool {
+func (s *sharedIndexInformer[T]) HasStarted() bool {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 	return s.started
 }
 
-func (s *sharedIndexInformer) HasSynced() bool {
+func (s *sharedIndexInformer[T]) HasSynced() bool {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -518,7 +525,7 @@ func (s *sharedIndexInformer) HasSynced() bool {
 	return s.controller.HasSynced()
 }
 
-func (s *sharedIndexInformer) LastSyncResourceVersion() string {
+func (s *sharedIndexInformer[T]) LastSyncResourceVersion() string {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -528,15 +535,15 @@ func (s *sharedIndexInformer) LastSyncResourceVersion() string {
 	return s.controller.LastSyncResourceVersion()
 }
 
-func (s *sharedIndexInformer) GetStore() Store {
+func (s *sharedIndexInformer[T]) GetStore() Store {
 	return s.indexer
 }
 
-func (s *sharedIndexInformer) GetIndexer() Indexer {
+func (s *sharedIndexInformer[T]) GetIndexer() Indexer {
 	return s.indexer
 }
 
-func (s *sharedIndexInformer) AddIndexers(indexers Indexers) error {
+func (s *sharedIndexInformer[T]) AddIndexers(indexers Indexers) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -547,11 +554,11 @@ func (s *sharedIndexInformer) AddIndexers(indexers Indexers) error {
 	return s.indexer.AddIndexers(indexers)
 }
 
-func (s *sharedIndexInformer) GetController() Controller {
-	return &dummyController{informer: s}
+func (s *sharedIndexInformer[T]) GetController() Controller {
+	return &dummyController[T]{informer: s}
 }
 
-func (s *sharedIndexInformer) AddEventHandler(handler ResourceEventHandler) (ResourceEventHandlerRegistration, error) {
+func (s *sharedIndexInformer[T]) AddEventHandler(handler ResourceEventHandler) (ResourceEventHandlerRegistration, error) {
 	return s.AddEventHandlerWithResyncPeriod(handler, s.defaultEventHandlerResyncPeriod)
 }
 
@@ -572,7 +579,7 @@ func determineResyncPeriod(desired, check time.Duration) time.Duration {
 
 const minimumResyncPeriod = 1 * time.Second
 
-func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration) (ResourceEventHandlerRegistration, error) {
+func (s *sharedIndexInformer[T]) AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration) (ResourceEventHandlerRegistration, error) {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 
@@ -629,7 +636,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	return handle, nil
 }
 
-func (s *sharedIndexInformer) HandleDeltas(obj interface{}, isInInitialList bool) error {
+func (s *sharedIndexInformer[T]) HandleDeltas(obj interface{}, isInInitialList bool) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
 
@@ -640,7 +647,7 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}, isInInitialList bool
 }
 
 // Conforms to ResourceEventHandler
-func (s *sharedIndexInformer) OnAdd(obj interface{}, isInInitialList bool) {
+func (s *sharedIndexInformer[T]) OnAdd(obj interface{}, isInInitialList bool) {
 	// Invocation of this function is locked under s.blockDeltas, so it is
 	// save to distribute the notification
 	s.cacheMutationDetector.AddObject(obj)
@@ -648,7 +655,7 @@ func (s *sharedIndexInformer) OnAdd(obj interface{}, isInInitialList bool) {
 }
 
 // Conforms to ResourceEventHandler
-func (s *sharedIndexInformer) OnUpdate(old, new interface{}) {
+func (s *sharedIndexInformer[T]) OnUpdate(old, new interface{}) {
 	isSync := false
 
 	// If is a Sync event, isSync should be true
@@ -670,20 +677,20 @@ func (s *sharedIndexInformer) OnUpdate(old, new interface{}) {
 }
 
 // Conforms to ResourceEventHandler
-func (s *sharedIndexInformer) OnDelete(old interface{}) {
+func (s *sharedIndexInformer[T]) OnDelete(old interface{}) {
 	// Invocation of this function is locked under s.blockDeltas, so it is
 	// save to distribute the notification
 	s.processor.distribute(deleteNotification{oldObj: old}, false)
 }
 
 // IsStopped reports whether the informer has already been stopped
-func (s *sharedIndexInformer) IsStopped() bool {
+func (s *sharedIndexInformer[T]) IsStopped() bool {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 	return s.stopped
 }
 
-func (s *sharedIndexInformer) RemoveEventHandler(handle ResourceEventHandlerRegistration) error {
+func (s *sharedIndexInformer[T]) RemoveEventHandler(handle ResourceEventHandlerRegistration) error {
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 

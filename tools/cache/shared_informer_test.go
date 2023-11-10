@@ -102,21 +102,21 @@ func (l *testListener) satisfiedExpectations() bool {
 }
 
 func eventHandlerCount(i SharedInformer) int {
-	s := i.(*sharedIndexInformer)
+	s := i.(*sharedIndexInformer[any])
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 	return len(s.processor.listeners)
 }
 
 func isStarted(i SharedInformer) bool {
-	s := i.(*sharedIndexInformer)
+	s := i.(*sharedIndexInformer[any])
 	s.startedLock.Lock()
 	defer s.startedLock.Unlock()
 	return s.started
 }
 
 func isRegistered(i SharedInformer, h ResourceEventHandlerRegistration) bool {
-	s := i.(*sharedIndexInformer)
+	s := i.(*sharedIndexInformer[any])
 	return s.processor.getListener(h) != nil
 }
 
@@ -202,7 +202,7 @@ func TestListenerResyncPeriods(t *testing.T) {
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod2"}})
 
 	// create the shared informer and resync every 1s
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	clock := testingclock.NewFakeClock(time.Now())
 	informer.clock = clock
@@ -287,7 +287,7 @@ func TestResyncCheckPeriod(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 
 	// create the shared informer and resync every 12 hours
-	informer := NewSharedInformer(source, &v1.Pod{}, 12*time.Hour).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 12*time.Hour).(*sharedIndexInformer[any])
 	gl := informer.processor.getListener
 
 	clock := testingclock.NewFakeClock(time.Now())
@@ -357,7 +357,7 @@ func TestResyncCheckPeriod(t *testing.T) {
 // verify that https://github.com/kubernetes/kubernetes/issues/59822 is fixed
 func TestSharedInformerInitializationRace(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	listener := newTestListener("raceListener", 0)
 
 	stop := make(chan struct{})
@@ -377,7 +377,7 @@ func TestSharedInformerWatchDisruption(t *testing.T) {
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod2", UID: "pod2", ResourceVersion: "2"}})
 
 	// create the shared informer and resync every 1s
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	clock := testingclock.NewFakeClock(time.Now())
 	informer.clock = clock
@@ -450,7 +450,7 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 	source.ListError = fmt.Errorf("Access Denied")
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	errCh := make(chan error)
 	_ = informer.SetWatchErrorHandler(func(_ *Reflector, err error) {
@@ -475,7 +475,7 @@ func TestSharedInformerErrorHandling(t *testing.T) {
 // Run and SetWatchErrorHandler, and Run and SetTransform.
 func TestSharedInformerStartRace(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	stop := make(chan struct{})
 	go func() {
 		for {
@@ -505,7 +505,7 @@ func TestSharedInformerTransformer(t *testing.T) {
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", UID: "pod1", ResourceVersion: "1"}})
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod2", UID: "pod2", ResourceVersion: "2"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	informer.SetTransform(func(obj interface{}) (interface{}, error) {
 		if pod, ok := obj.(*v1.Pod); ok {
 			name := pod.GetName()
@@ -572,12 +572,12 @@ func TestSharedInformerRemoveForeignHandler(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	source2 := fcache.NewFakeControllerSource()
 	source2.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer2 := NewSharedInformer(source2, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer2 := NewSharedInformer(source2, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	handler1 := &ResourceEventHandlerFuncs{}
 	handle1, err := informer.AddEventHandler(handler1)
@@ -654,7 +654,7 @@ func TestSharedInformerMultipleRegistration(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	handler1 := &ResourceEventHandlerFuncs{}
 	reg1, err := informer.AddEventHandler(handler1)
@@ -722,7 +722,7 @@ func TestRemovingRemovedSharedInformer(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	handler := &ResourceEventHandlerFuncs{}
 	reg, err := informer.AddEventHandler(handler)
 
@@ -752,7 +752,7 @@ func TestRemovingRemovedSharedInformer(t *testing.T) {
 // test. Meant to be run with -race to find race conditions
 func TestSharedInformerHandlerAbuse(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 
 	ctx, cancel := context.WithCancel(context.Background())
 	informerCtx, informerCancel := context.WithCancel(context.Background())
@@ -868,7 +868,7 @@ func TestStateSharedInformer(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	listener := newTestListener("listener", 0, "pod1")
 	informer.AddEventHandlerWithResyncPeriod(listener, listener.resyncPeriod)
 
@@ -917,7 +917,7 @@ func TestAddOnStoppedSharedInformer(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	listener := newTestListener("listener", 0, "pod1")
 	stop := make(chan struct{})
 	go informer.Run(stop)
@@ -950,7 +950,7 @@ func TestRemoveOnStoppedSharedInformer(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 	source.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}})
 
-	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 1*time.Second).(*sharedIndexInformer[any])
 	listener := newTestListener("listener", 0, "pod1")
 	handle, err := informer.AddEventHandlerWithResyncPeriod(listener, listener.resyncPeriod)
 	if err != nil {
@@ -979,7 +979,7 @@ func TestRemoveWhileActive(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 
 	// create the shared informer and resync every 12 hours
-	informer := NewSharedInformer(source, &v1.Pod{}, 0).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 0).(*sharedIndexInformer[any])
 
 	listener := newTestListener("listener", 0, "pod1")
 	handle, _ := informer.AddEventHandler(listener)
@@ -1015,7 +1015,7 @@ func TestAddWhileActive(t *testing.T) {
 	source := fcache.NewFakeControllerSource()
 
 	// create the shared informer and resync every 12 hours
-	informer := NewSharedInformer(source, &v1.Pod{}, 0).(*sharedIndexInformer)
+	informer := NewSharedInformer(source, &v1.Pod{}, 0).(*sharedIndexInformer[any])
 	listener1 := newTestListener("originalListener", 0, "pod1")
 	listener2 := newTestListener("listener2", 0, "pod1", "pod2")
 	handle1, _ := informer.AddEventHandler(listener1)
