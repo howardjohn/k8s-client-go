@@ -1,4 +1,4 @@
-package main
+package generics
 
 import (
 	"context"

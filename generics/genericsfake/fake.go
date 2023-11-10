@@ -1,9 +1,10 @@
-package main
+package genericsfake
 
 import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/generics"
 	"reflect"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,12 +50,12 @@ func NewSimpleClientset(objects ...runtime.Object) *Clientset {
 	return cs
 }
 
-type fakeAPI[T Resource] struct {
+type fakeAPI[T generics.Resource] struct {
 	*testing.Fake
 	tracker testing.ObjectTracker
 }
 
-func NewFake[T Resource](objects ...T) FakeAPI[T] {
+func NewFake[T generics.Resource](objects ...T) FakeAPI[T] {
 	csf := NewSimpleClientset()
 	f := &csf.Fake
 	o := csf.tracker
@@ -68,17 +69,6 @@ func NewFake[T Resource](objects ...T) FakeAPI[T] {
 		tracker: o,
 		Fake:    f,
 	}
-	//cs.AddReactor("*", "*", testing.ObjectReaction(o))
-	//cs.AddWatchReactor("*", func(action testing.Action) (handled bool, ret watch.Interface, err error) {
-	//	gvr := action.GetResource()
-	//	ns := action.GetNamespace()
-	//	watch, err := o.Watch(gvr, ns)
-	//	if err != nil {
-	//		return false, nil, err
-	//	}
-	//	return true, watch, nil
-	//})
-
 	return cs
 }
 
@@ -109,7 +99,7 @@ func (f fakeAPI[T]) List(namespace string, options metav1.ListOptions) ([]T, err
 	gvr := (*x).ResourceMetadata().WithResource((*x).ResourceName())
 	gvk := (*x).ResourceMetadata().WithKind(typeName(x))
 	obj, err := f.Fake.
-		Invokes(testing.NewListAction(gvr, gvk, namespace, options), &GenericList[T]{})
+		Invokes(testing.NewListAction(gvr, gvk, namespace, options), &generics.GenericList[T]{})
 
 	if obj == nil {
 		return nil, err
@@ -122,15 +112,15 @@ func (f fakeAPI[T]) List(namespace string, options metav1.ListOptions) ([]T, err
 	return reflect.ValueOf(obj).Elem().FieldByName("Items").Interface().([]T), nil
 }
 
-func (f fakeAPI[T]) Watch(namespace string, options metav1.ListOptions) (Watcher[T], error) {
+func (f fakeAPI[T]) Watch(namespace string, options metav1.ListOptions) (generics.Watcher[T], error) {
 	x := new(T)
 	gvr := (*x).ResourceMetadata().WithResource((*x).ResourceName())
 	wi, err := f.Fake.
 		InvokesWatch(testing.NewWatchAction(gvr, namespace, options))
 	if err != nil {
-		return Watcher[T]{}, err
+		return generics.Watcher[T]{}, err
 	}
-	return newWatcher[T](wi), nil
+	return generics.NewWatcher[T](wi), nil
 }
 
 func (f fakeAPI[T]) Create(t T, options metav1.CreateOptions) (*T, error) {
@@ -157,13 +147,13 @@ func (f fakeAPI[T]) Update(t T, options metav1.UpdateOptions) (*T, error) {
 	return any(obj).(*T), nil
 }
 
-func (f fakeAPI[T]) Namespace(namespace string) NamespacedAPI[T] {
+func (f fakeAPI[T]) Namespace(namespace string) generics.NamespacedAPI[T] {
 	// TODO implement me
 	panic("implement me")
 }
 
-var _ FakeAPI[Resource] = fakeAPI[Resource]{}
+var _ FakeAPI[generics.Resource] = fakeAPI[generics.Resource]{}
 
-type FakeAPI[T Resource] interface {
-	API[T]
+type FakeAPI[T generics.Resource] interface {
+	generics.API[T]
 }

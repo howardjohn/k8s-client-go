@@ -1,6 +1,9 @@
-package main
+package generics
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 type NamespacedAPI[T Resource] interface {
 	Create(t T, options metav1.CreateOptions) (*T, error)
@@ -129,4 +132,15 @@ func (a infallibleOptionlessNamespacedAPI[T]) Watch() Watcher[T] {
 		panic(err.Error()) // Taking a testing.T is probably better
 	}
 	return res
+}
+
+func CreateOrUpdate[T Resource](a API[T], t T) (*T, error) {
+	r, err := a.Create(t, metav1.CreateOptions{})
+	if err != nil {
+		if kerrors.IsAlreadyExists(err) {
+			return a.Update(t, metav1.UpdateOptions{})
+		}
+		return nil, err
+	}
+	return r, nil
 }

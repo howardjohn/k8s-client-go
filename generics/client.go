@@ -1,4 +1,4 @@
-package main
+package generics
 
 import (
 	"context"
@@ -90,6 +90,13 @@ type Client struct {
 	parameterCodec runtime.ParameterCodec
 }
 
+func NewClient(rc rest.Interface, s *runtime.Scheme) *Client {
+	return &Client{
+		client:         rc,
+		parameterCodec: runtime.NewParameterCodec(s),
+	}
+}
+
 func Get[T Resource](c *Client, name, namespace string, options metav1.GetOptions) (*T, error) {
 	result := new(T)
 	gv := (*result).ResourceMetadata()
@@ -179,7 +186,7 @@ func Watch[T Resource](c *Client, namespace string, options metav1.ListOptions) 
 	if err != nil {
 		return Watcher[T]{}, err
 	}
-	return newWatcher[T](wi), nil
+	return NewWatcher[T](wi), nil
 }
 
 type Watcher[T Resource] struct {
@@ -187,7 +194,7 @@ type Watcher[T Resource] struct {
 	ch    chan T
 }
 
-func newWatcher[T Resource](wi watch.Interface) Watcher[T] {
+func NewWatcher[T Resource](wi watch.Interface) Watcher[T] {
 	cc := make(chan T)
 	go func() {
 		for {
