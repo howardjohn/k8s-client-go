@@ -2,7 +2,6 @@ package generics
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -49,39 +48,43 @@ type API[T Resource] interface {
 	Watch(namespace string, options metav1.ListOptions) (Watcher[T], error)
 }
 
-type api[T Resource] struct {
+type api[T Resource, PT interface {
+	runtime.Object
+	*T
+}] struct {
 	c *Client
 }
 
-func (a api[T]) Get(name, namespace string, options metav1.GetOptions) (*T, error) {
-	return Get[T](a.c, name, namespace, options)
+func (a api[T, PT]) Get(name, namespace string, options metav1.GetOptions) (*T, error) {
+	return Get[T, PT](a.c, name, namespace, options)
 }
 
-func (a api[T]) List(namespace string, options metav1.ListOptions) ([]T, error) {
+func (a api[T, PT]) List(namespace string, options metav1.ListOptions) ([]T, error) {
 	return List[T](a.c, namespace, options)
 }
 
-func (a api[T]) Watch(namespace string, options metav1.ListOptions) (Watcher[T], error) {
+func (a api[T, PT]) Watch(namespace string, options metav1.ListOptions) (Watcher[T], error) {
 	return Watch[T](a.c, namespace, options)
 }
 
-func (a api[T]) Create(t T, options metav1.CreateOptions) (*T, error) {
+func (a api[T, PT]) Create(t T, options metav1.CreateOptions) (*T, error) {
 	return Create[T](a.c, t, options)
 }
 
-func (a api[T]) Update(t T, options metav1.UpdateOptions) (*T, error) {
+func (a api[T, PT]) Update(t T, options metav1.UpdateOptions) (*T, error) {
 	return Update[T](a.c, t, options)
 }
 
-var _ API[Resource] = api[Resource]{}
+//var _ API[Resource, runtime.Object] = api[Resource, runtime.Object]{}
 
-func NewAPI[T Resource](c *Client) API[T] {
-	return api[T]{c: c}
+func NewAPI[T Resource, PT interface {
+	runtime.Object
+	*T
+}](c *Client) API[T] {
+	return api[T, PT]{c: c}
 }
 
 type Resource interface {
-	ResourceMetadata() schema.GroupVersion
-	ResourceName() string
 }
 
 func resourceAsobject(r Resource) runtime.Object {
@@ -102,13 +105,16 @@ func NewClient(rc rest.Interface, s *runtime.Scheme) *Client {
 	}
 }
 
-func Get[T Resource](c *Client, name, namespace string, options metav1.GetOptions) (*T, error) {
+func Get[T Resource, PT interface {
+	runtime.Object
+	*T
+}](c *Client, name, namespace string, options metav1.GetOptions) (*T, error) {
 	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := resourceMetadata[T](c)
 	x := (any)(result).(runtime.Object)
 	err := c.client.Get().
 		Namespace(namespace).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		Name(name).
 		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
@@ -117,29 +123,29 @@ func Get[T Resource](c *Client, name, namespace string, options metav1.GetOption
 	return result, err
 }
 
-func ResourceMetadata[T Resource](c *Client) schema.GroupVersionResource {
+func resourceMetadata[T Resource](c *Client) schema.GroupVersionResource {
 	n := any(new(T))
 	kinds, _, _ := c.scheme.ObjectKinds(n.(runtime.Object))
 	k := kinds[0]
 	return schema.GroupVersionResource{
 		Group:    k.Group,
 		Version:  k.Version,
-		Resource: name[T](),
+		Resource: Name[T](),
 	}
 }
 
 func Create[T Resource](c *Client, t T, options metav1.CreateOptions) (*T, error) {
+	gv := resourceMetadata[T](c)
 	result := new(T)
-	gv := ResourceMetadata[T](c)
 	x := (any)(result).(runtime.Object)
 	meta := (any)(t).(metav1.Object)
 
 	err := c.client.Post().
 		Namespace(meta.GetNamespace()).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		Name(meta.GetName()).
 		VersionedParams(&options, c.parameterCodec).
-		AbsPath(defaultPath2(gv)).
+		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(x)
 	return result, err
@@ -147,13 +153,13 @@ func Create[T Resource](c *Client, t T, options metav1.CreateOptions) (*T, error
 
 func Update[T Resource](c *Client, t T, options metav1.UpdateOptions) (*T, error) {
 	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := resourceMetadata[T](c)
 	x := (any)(result).(runtime.Object)
 	meta := (any)(t).(metav1.Object)
 
 	err := c.client.Put().
 		Namespace(meta.GetNamespace()).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		Name(meta.GetName()).
 		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
@@ -168,13 +174,13 @@ func List[T Resource](c *Client, namespace string, opts metav1.ListOptions) ([]T
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	x := ObjectList[T]{}
-	gv := ResourceMetadata[T](c)
+	gv := resourceMetadata[T](c)
 	err := c.client.Get().
 		Namespace(namespace).
 		Resource(gv.Resource).
 		Timeout(timeout).
 		VersionedParams(&opts, c.parameterCodec).
-		AbsPath(defaultPath2(gv)).
+		AbsPath(defaultPath(gv)).
 		Do(context.Background()).
 		Into(&x)
 	return x.Items, err
@@ -189,12 +195,11 @@ func MustList[T Resource](c *Client, namespace string) []T {
 }
 
 func Watch[T Resource](c *Client, namespace string, options metav1.ListOptions) (Watcher[T], error) {
-	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := resourceMetadata[T](c)
 	options.Watch = true
 	wi, err := c.client.Get().
 		Namespace(namespace).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		VersionedParams(&options, c.parameterCodec).
 		AbsPath(defaultPath(gv)).
 		Watch(context.Background())
@@ -238,15 +243,7 @@ func (w Watcher[T]) Results() <-chan T {
 	return w.ch
 }
 
-func defaultPath(gv schema.GroupVersion) string {
-	apiPath := "apis"
-	if gv.Group == corev1.GroupName {
-		apiPath = "api"
-	}
-	return rest.DefaultVersionedAPIPath(apiPath, gv)
-}
-
-func defaultPath2(gv schema.GroupVersionResource) string {
+func defaultPath(gv schema.GroupVersionResource) string {
 	apiPath := "apis"
 	if gv.Group == corev1.GroupName {
 		apiPath = "api"
@@ -369,7 +366,7 @@ func toRuntimeObject[T Resource](res []T) runtime.Object {
 	return &GenericList[T]{Items: res}
 }
 
-func name[T Resource]() string {
+func Name[T Resource]() string {
 	pn := &pluralNamer{finalize: strings.ToLower}
 	return pn.Name(reflect.TypeOf(*new(T)).Name())
 }

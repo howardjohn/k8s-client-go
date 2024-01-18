@@ -10,15 +10,15 @@ import (
 
 type ResourceLogger interface {
 	Resource
-	IsLogger()
+	// TODO: add constraint into types
+	//IsLogger()
 }
 
 func GetLogs[T ResourceLogger](c *Client, name, namespace string, opts v1.PodLogOptions) (string, error) {
-	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := resourceMetadata[T](c)
 	res, err := c.client.Get().
 		Namespace(namespace).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		SubResource("log").
 		Name(name).
 		VersionedParams(&opts, c.parameterCodec).
