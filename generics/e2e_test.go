@@ -38,6 +38,7 @@ func TestGenericsLive(t *testing.T) {
 	s := runtime.NewScheme()
 	metav1.AddMetaToScheme(s)
 	corev1.AddToScheme(s)
+	appsv1.AddToScheme(s)
 	cf := serializer.NewCodecFactory(s)
 	restConfig.NegotiatedSerializer = cf.WithoutConversion()
 	restConfig.GroupVersion = &schema.GroupVersion{Version: "v1"}

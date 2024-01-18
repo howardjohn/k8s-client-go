@@ -2,6 +2,9 @@ package generics
 
 import (
 	"context"
+	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,17 +85,19 @@ type Resource interface {
 }
 
 func resourceAsobject(r Resource) runtime.Object {
-	return any(&r).(runtime.Object)
+	return any(r).(runtime.Object)
 }
 
 type Client struct {
 	client         rest.Interface
 	parameterCodec runtime.ParameterCodec
+	scheme         *runtime.Scheme
 }
 
 func NewClient(rc rest.Interface, s *runtime.Scheme) *Client {
 	return &Client{
 		client:         rc,
+		scheme:         s,
 		parameterCodec: runtime.NewParameterCodec(s),
 	}
 }
@@ -112,9 +117,20 @@ func Get[T Resource](c *Client, name, namespace string, options metav1.GetOption
 	return result, err
 }
 
+func ResourceMetadata[T Resource](c *Client) schema.GroupVersionResource {
+	n := any(new(T))
+	kinds, _, _ := c.scheme.ObjectKinds(n.(runtime.Object))
+	k := kinds[0]
+	return schema.GroupVersionResource{
+		Group:    k.Group,
+		Version:  k.Version,
+		Resource: name[T](),
+	}
+}
+
 func Create[T Resource](c *Client, t T, options metav1.CreateOptions) (*T, error) {
 	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := ResourceMetadata[T](c)
 	x := (any)(result).(runtime.Object)
 	meta := (any)(t).(metav1.Object)
 
@@ -123,7 +139,7 @@ func Create[T Resource](c *Client, t T, options metav1.CreateOptions) (*T, error
 		Resource((*result).ResourceName()).
 		Name(meta.GetName()).
 		VersionedParams(&options, c.parameterCodec).
-		AbsPath(defaultPath(gv)).
+		AbsPath(defaultPath2(gv)).
 		Do(context.Background()).
 		Into(x)
 	return result, err
@@ -152,14 +168,13 @@ func List[T Resource](c *Client, namespace string, opts metav1.ListOptions) ([]T
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	x := ObjectList[T]{}
-	result := new(T)
-	gv := (*result).ResourceMetadata()
+	gv := ResourceMetadata[T](c)
 	err := c.client.Get().
 		Namespace(namespace).
-		Resource((*result).ResourceName()).
+		Resource(gv.Resource).
 		Timeout(timeout).
 		VersionedParams(&opts, c.parameterCodec).
-		AbsPath(defaultPath(gv)).
+		AbsPath(defaultPath2(gv)).
 		Do(context.Background()).
 		Into(&x)
 	return x.Items, err
@@ -229,6 +244,14 @@ func defaultPath(gv schema.GroupVersion) string {
 		apiPath = "api"
 	}
 	return rest.DefaultVersionedAPIPath(apiPath, gv)
+}
+
+func defaultPath2(gv schema.GroupVersionResource) string {
+	apiPath := "apis"
+	if gv.Group == corev1.GroupName {
+		apiPath = "api"
+	}
+	return rest.DefaultVersionedAPIPath(apiPath, gv.GroupVersion())
 }
 
 type Lister[T Resource] interface {
@@ -344,4 +367,87 @@ func (in GenericList[T]) DeepCopyObject() runtime.Object {
 
 func toRuntimeObject[T Resource](res []T) runtime.Object {
 	return &GenericList[T]{Items: res}
+}
+
+func name[T Resource]() string {
+	pn := &pluralNamer{finalize: strings.ToLower}
+	return pn.Name(reflect.TypeOf(*new(T)).Name())
+}
+
+type pluralNamer struct {
+	// key is the case-sensitive type name, value is the case-insensitive
+	// intended output.
+	exceptions map[string]string
+	finalize   func(string) string
+}
+
+// Name returns the plural form of the type's name. If the type's name is found
+// in the exceptions map, the map value is returned.
+func (r *pluralNamer) Name(singular string) string {
+	var plural string
+	var ok bool
+	if plural, ok = r.exceptions[singular]; ok {
+		return r.finalize(plural)
+	}
+	if len(singular) < 2 {
+		return r.finalize(singular)
+	}
+
+	switch rune(singular[len(singular)-1]) {
+	case 's', 'x', 'z':
+		plural = esPlural(singular)
+	case 'y':
+		sl := rune(singular[len(singular)-2])
+		if isConsonant(sl) {
+			plural = iesPlural(singular)
+		} else {
+			plural = sPlural(singular)
+		}
+	case 'h':
+		sl := rune(singular[len(singular)-2])
+		if sl == 'c' || sl == 's' {
+			plural = esPlural(singular)
+		} else {
+			plural = sPlural(singular)
+		}
+	case 'e':
+		sl := rune(singular[len(singular)-2])
+		if sl == 'f' {
+			plural = vesPlural(singular[:len(singular)-1])
+		} else {
+			plural = sPlural(singular)
+		}
+	case 'f':
+		plural = vesPlural(singular)
+	default:
+		plural = sPlural(singular)
+	}
+	return r.finalize(plural)
+}
+
+func iesPlural(singular string) string {
+	return singular[:len(singular)-1] + "ies"
+}
+
+func vesPlural(singular string) string {
+	return singular[:len(singular)-1] + "ves"
+}
+
+func esPlural(singular string) string {
+	return singular + "es"
+}
+
+func sPlural(singular string) string {
+	return singular + "s"
+}
+
+const consonants = "bcdfghjklmnpqrstvwxyz"
+
+func isConsonant(char rune) bool {
+	for _, c := range consonants {
+		if char == c {
+			return true
+		}
+	}
+	return false
 }
