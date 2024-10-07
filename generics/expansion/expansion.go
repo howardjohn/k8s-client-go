@@ -1,3 +1,6 @@
+//go:build expansion
+// +build expansion
+
 package generics
 
 import (

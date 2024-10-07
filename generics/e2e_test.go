@@ -3,18 +3,20 @@ package generics_test
 import (
 	"flag"
 	"fmt"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/client-go/generics"
-	"k8s.io/client-go/generics/genericsfake"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
-	"k8s.io/klog/v2"
 	"log"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/generics"
+	"k8s.io/client-go/generics/expansion"
+	"k8s.io/client-go/generics/genericsfake"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
+	"k8s.io/klog/v2"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -66,7 +68,7 @@ func TestGenericsLive(t *testing.T) {
 	}
 
 	pod := generics.MustList[corev1.Pod](c, "istio-system")[0].Name
-	logs, err := generics.GetLogs[corev1.Pod](c, pod, "istio-system", corev1.PodLogOptions{})
+	logs, err := expansion.GetLogs[corev1.Pod](c, pod, "istio-system", corev1.PodLogOptions{})
 	log.Printf("%v, %v\n", logs[:100], err)
 
 	pods := generics.NewAPI[corev1.Pod](c)

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -245,7 +244,7 @@ func (w Watcher[T]) Results() <-chan T {
 
 func defaultPath(gv schema.GroupVersionResource) string {
 	apiPath := "apis"
-	if gv.Group == corev1.GroupName {
+	if gv.Group == "" {
 		apiPath = "api"
 	}
 	return rest.DefaultVersionedAPIPath(apiPath, gv.GroupVersion())
